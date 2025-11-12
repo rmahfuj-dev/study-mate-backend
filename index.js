@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri = process.env.MONGO_URI;
 const app = express();
 const cors = require("cors");
@@ -50,6 +50,53 @@ async function run() {
       const cursor = partners.find({});
       const allValues = await cursor.toArray();
       res.send(allValues);
+    });
+
+    // get single user's profile api
+    app.get("/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const user = await partners.findOne({ _id: new ObjectId(id) });
+        console.log("api hitted");
+        res.send(user);
+      } catch (err) {
+        res.status(404).send({ error: "cant't find the user" });
+      }
+    });
+
+    // api for search partner
+    app.get("/partners/search", async (req, res) => {
+      const name = req.query.name;
+      const searchedUsers = await partners
+        .find({ name: { $regex: name, $options: "i" } })
+        .toArray();
+      res.send(searchedUsers);
+    });
+
+    // api for sorting partners
+    app.get("/partners/sort", async (req, res) => {
+      try {
+        const { sort, order } = req.query;
+        const sortField = ["rating", "experienceLevel", "patnerCount"].includes(
+          sort
+        )
+          ? sort
+          : null;
+
+        if (!sortField) {
+          return res.status(400).send({ error: "Invalid sort field" });
+        }
+
+        const sortOrder = order === "desc" ? -1 : 1;
+
+        const cursor = partners.find({}).sort({ [sortField]: sortOrder });
+        const sortedPartners = await cursor.toArray();
+
+        res.send(sortedPartners);
+      } catch (err) {
+        console.log(err);
+        res.status(500).send({ error: "Failed to fetch sorted partners" });
+      }
     });
   } finally {
   }
