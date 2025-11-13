@@ -201,6 +201,53 @@ async function run() {
 
       res.send(myConnect);
     });
+
+    // api for delete a connect
+    app.delete("/connects/delete", async (req, res) => {
+      const { userEmail, partnerEmail } = req.query;
+
+      if (!userEmail || !partnerEmail) {
+        return res
+          .status(400)
+          .send({ error: "Both userEmail and partnerEmail are required" });
+      }
+
+      try {
+        const result = await connects.updateOne(
+          { userEmail },
+          { $pull: { connections: { partnerEmail } } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .send({ error: "Connection not found or already deleted" });
+        }
+
+        await partners.updateOne(
+          { email: partnerEmail },
+          { $inc: { partnerCount: -1 } }
+        );
+
+        const updatedUserConnects = await connects.findOne({ userEmail });
+
+        if (
+          !updatedUserConnects ||
+          updatedUserConnects.connections.length === 0
+        ) {
+          await connects.deleteOne({ userEmail });
+          return res.status(200).send({
+            message:
+              "All connections deleted, user removed from connects collection",
+          });
+        }
+
+        res.status(200).send({ message: "Connection deleted successfully" });
+      } catch (err) {
+        console.error("Error deleting connection:", err);
+        res.status(500).send({ error: "Failed to delete connection" });
+      }
+    });
   } finally {
   }
 }
