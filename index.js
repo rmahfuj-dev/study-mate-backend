@@ -19,11 +19,11 @@ app.get("/", (req, res) => {
 });
 async function run() {
   try {
-    await client.connect();
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.connect();
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
     const studyMate = client.db("study-mate");
     const users = studyMate.collection("users");
     const partners = studyMate.collection("partners");
@@ -38,7 +38,7 @@ async function run() {
           res.status(500).send({ error: "user already exist" });
         } else {
           const result = await users.insertOne(user);
-          console.log(user);
+          // console.log(user);
           res.send(result);
         }
       } catch (err) {
@@ -111,7 +111,7 @@ async function run() {
 
         res.send(sortedPartners);
       } catch (err) {
-        console.log(err);
+        // console.log(err);
         res.status(500).send({ error: "Failed to fetch sorted partners" });
       }
     });
@@ -142,6 +142,11 @@ async function run() {
           return res
             .status(400)
             .send({ error: "Both userEmail and partnerEmail are required" });
+        }
+        if (userEmail == partnerEmail) {
+          return res
+            .status(500)
+            .send({ error: "You cant't add yourself to connects" });
         }
 
         const userConnects = await connects.findOne({ userEmail });
@@ -187,23 +192,32 @@ async function run() {
 
     // get my connections
     app.get("/my-connects", async (req, res) => {
-      const { userEmail } = req.query;
+      try {
+        const { userEmail } = req.query;
 
-      const userConnects = await connects.findOne({ userEmail });
+        const userConnects = await connects.findOne({ userEmail });
 
-      if (!userConnects || !userConnects.connections) {
-        return res.status(404).send({ message: "No connections found" });
+        if (
+          !userConnects ||
+          !userConnects.connections ||
+          userConnects.connections.length === 0
+        ) {
+          // Return empty array instead of 404
+          return res.status(200).send([]);
+        }
+
+        const connectList = userConnects.connections;
+        const partnerEmails = connectList.map((c) => c.partnerEmail);
+
+        const myConnect = await partners
+          .find({ email: { $in: partnerEmails } })
+          .toArray();
+
+        res.status(200).send(myConnect);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ error: "Server error fetching connects" });
       }
-
-      const connectList = userConnects.connections;
-
-      const partnerEmails = connectList.map((c) => c.partnerEmail);
-
-      const myConnect = await partners
-        .find({ email: { $in: partnerEmails } })
-        .toArray();
-
-      res.send(myConnect);
     });
 
     // api for delete a connect
@@ -290,11 +304,9 @@ async function run() {
         req.body;
 
       if (!userEmail || !partnerEmail || !partnerName) {
-        return res
-          .status(400)
-          .send({
-            error: "userEmail, partnerEmail, and partnerName are required",
-          });
+        return res.status(400).send({
+          error: "userEmail, partnerEmail, and partnerName are required",
+        });
       }
 
       try {
@@ -327,6 +339,4 @@ async function run() {
   }
 }
 run().catch(console.dir);
-app.listen(port, () => {
-  console.log(`server running at port ${port}`);
-});
+app.listen(port);
