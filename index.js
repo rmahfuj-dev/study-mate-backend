@@ -27,6 +27,7 @@ async function run() {
     const studyMate = client.db("study-mate");
     const users = studyMate.collection("users");
     const partners = studyMate.collection("partners");
+    const connects = studyMate.collection("connects");
 
     // api for userData
     app.post("/users", async (req, res) => {
@@ -47,20 +48,34 @@ async function run() {
 
     // api for partner profiles data
     app.get("/partners", async (req, res) => {
-      const cursor = partners.find({});
-      const allValues = await cursor.toArray();
-      res.send(allValues);
+      try {
+        const cursor = partners.find({});
+        const allValues = await cursor.toArray();
+        res.send(allValues);
+      } catch (err) {
+        res.status(500).send({ error: "can't find the user's data" });
+      }
     });
 
-    // get single user's profile api
-    app.get("/users/:id", async (req, res) => {
+    // api for userDetails
+    app.get("/partner/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        const user = await partners.findOne({ _id: new ObjectId(id) });
-        console.log("api hitted");
-        res.send(user);
+
+        const query = ObjectId.isValid(id)
+          ? { $or: [{ _id: new ObjectId(id) }, { _id: id }] }
+          : { _id: id };
+
+        const partner = await partners.findOne(query);
+
+        if (!partner) {
+          return res.status(404).json({ error: "Partner not found" });
+        }
+
+        res.status(200).json(partner);
       } catch (err) {
-        res.status(404).send({ error: "cant't find the user" });
+        console.error("Error fetching partner profile:", err);
+        res.status(500).json({ error: "Internal server error" });
       }
     });
 
@@ -77,9 +92,11 @@ async function run() {
     app.get("/partners/sort", async (req, res) => {
       try {
         const { sort, order } = req.query;
-        const sortField = ["rating", "experienceLevel", "patnerCount"].includes(
-          sort
-        )
+        const sortField = [
+          "rating",
+          "experienceLevel",
+          "partnerCount",
+        ].includes(sort)
           ? sort
           : null;
 
@@ -97,6 +114,92 @@ async function run() {
         console.log(err);
         res.status(500).send({ error: "Failed to fetch sorted partners" });
       }
+    });
+
+    // api for create partner profile and add it into db
+    app.post("/create-profile", async (req, res) => {
+      try {
+        const newPartner = req.body;
+        const existingUser = await partners.findOne({
+          email: newPartner.email,
+        });
+        if (existingUser) {
+          res.status(500).send({ error: "You already has partner profile" });
+        } else {
+          const result = await partners.insertOne(newPartner);
+          res.send(result);
+        }
+      } catch (err) {
+        res.status(500).send({ error: "Can't add user" });
+      }
+    });
+
+    // add new connect to db
+    app.post("/connects/add", async (req, res) => {
+      try {
+        const { userEmail, partnerEmail } = req.body;
+        if (!userEmail || !partnerEmail) {
+          return res
+            .status(400)
+            .send({ error: "Both userEmail and partnerEmail are required" });
+        }
+
+        const userConnects = await connects.findOne({ userEmail });
+
+        if (userConnects) {
+          const alreadyConnected = userConnects.connections?.some(
+            (c) => c.partnerEmail === partnerEmail
+          );
+
+          if (alreadyConnected) {
+            return res.status(400).send({ error: "Partner already connected" });
+          }
+
+          await connects.updateOne(
+            { userEmail },
+            { $push: { connections: { partnerEmail, sentAt: new Date() } } }
+          );
+        } else {
+          await connects.insertOne({
+            userEmail,
+            connections: [{ partnerEmail, sentAt: new Date() }],
+          });
+        }
+
+        const updatePartnerCount = await partners.updateOne(
+          { email: partnerEmail },
+          { $inc: { partnerCount: 1 } }
+        );
+
+        res.status(200).send({
+          message: "Connection added successfully",
+          updatePartnerCount,
+        });
+      } catch (err) {
+        console.error("Error adding connection:", err);
+        res.status(500).send({ error: "Can't add that user to your connects" });
+      }
+    });
+
+    // get my connections
+    app.get("/my-connects", async (req, res) => {
+      const { userEmail } = req.query;
+
+      const userConnects = await connects.findOne({ userEmail });
+
+      if (!userConnects || !userConnects.connections) {
+        return res.status(404).send({ message: "No connections found" });
+      }
+
+      const connectList = userConnects.connections;
+
+      const partnerEmails = connectList.map((c) => c.partnerEmail);
+
+      const myConnect = await partners
+        .find({ email: { $in: partnerEmails } })
+        .toArray();
+
+      res.send(myConnect);
     });
   } finally {
   }
