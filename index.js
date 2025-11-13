@@ -137,7 +137,7 @@ async function run() {
     // add new connect to db
     app.post("/connects/add", async (req, res) => {
       try {
-        const { userEmail, partnerEmail } = req.body;
+        const { userEmail, partnerEmail, partnerName } = req.body;
         if (!userEmail || !partnerEmail) {
           return res
             .status(400)
@@ -157,12 +157,16 @@ async function run() {
 
           await connects.updateOne(
             { userEmail },
-            { $push: { connections: { partnerEmail, sentAt: new Date() } } }
+            {
+              $push: {
+                connections: { partnerEmail, partnerName, sentAt: new Date() },
+              },
+            }
           );
         } else {
           await connects.insertOne({
             userEmail,
-            connections: [{ partnerEmail, sentAt: new Date() }],
+            connections: [{ partnerEmail, partnerName, sentAt: new Date() }],
           });
         }
 
@@ -246,6 +250,77 @@ async function run() {
       } catch (err) {
         console.error("Error deleting connection:", err);
         res.status(500).send({ error: "Failed to delete connection" });
+      }
+    });
+
+    // get partner name from connects collection
+    app.get("/connect/:partnerEmail", async (req, res) => {
+      const { partnerEmail } = req.params;
+
+      const partnerDoc = await connects.findOne({
+        "connections.partnerEmail": partnerEmail,
+      });
+
+      if (!partnerDoc) {
+        return res.status(404).send({ error: "Connection not found" });
+      }
+
+      const connection = partnerDoc.connections.find(
+        (c) => c.partnerEmail === partnerEmail
+      );
+
+      if (!connection) {
+        return res
+          .status(404)
+          .send({ error: "Connection not found inside user connects" });
+      }
+
+      const partnerDetails = {
+        partnerName: connection.partnerName,
+        subject: connection.subject,
+        studyMode: connection.studyMode,
+      };
+
+      res.send(partnerDetails);
+    });
+
+    // update partner name in connect collection
+    app.put("/connects/update", async (req, res) => {
+      const { userEmail, partnerEmail, partnerName, subject, studyMode } =
+        req.body;
+
+      if (!userEmail || !partnerEmail || !partnerName) {
+        return res
+          .status(400)
+          .send({
+            error: "userEmail, partnerEmail, and partnerName are required",
+          });
+      }
+
+      try {
+        const result = await connects.updateOne(
+          { userEmail, "connections.partnerEmail": partnerEmail },
+          {
+            $set: {
+              "connections.$.partnerName": partnerName,
+              ...(subject && { "connections.$.subject": subject }),
+              ...(studyMode && { "connections.$.studyMode": studyMode }),
+            },
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .send({ error: "Connection not found or nothing to update" });
+        }
+
+        res
+          .status(200)
+          .send({ message: "Partner details updated successfully" });
+      } catch (err) {
+        console.error("Error updating partner:", err);
+        res.status(500).send({ error: "Failed to update partner details" });
       }
     });
   } finally {
